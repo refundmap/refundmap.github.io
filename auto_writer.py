@@ -55,33 +55,45 @@ def generate_post(keyword):
     [마크다운 본문]
     """
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            print(f"글 생성 요청 중... (시도 {attempt + 1}/{max_retries})")
-            response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt
-            )
-            text = response.text
-            
-            title_part = text.split("IMAGE_PROMPT:")[0]
-            rest = text.split("IMAGE_PROMPT:")[1]
-            img_part = rest.split("CONTENT:")[0]
-            content = rest.split("CONTENT:")[1].strip()
+    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.8-flash"]
+    last_error = None
 
-            title = title_part.replace("TITLE:", "").strip().replace('"', '')
-            image_prompt = img_part.strip()
-            return title, image_prompt, content
+    for model_name in candidate_models:
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                print(f"[{model_name}] 글 생성 요청 중... (시도 {attempt + 1}/{max_retries})")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                text = response.text
+                
+                title_part = text.split("IMAGE_PROMPT:")[0]
+                rest = text.split("IMAGE_PROMPT:")[1]
+                img_part = rest.split("CONTENT:")[0]
+                content = rest.split("CONTENT:")[1].strip()
 
-        except (ServerError, APIError) as e:
-            print(f"구글 서버 일시적 지연 (503 등): {e}")
-            if attempt < max_retries - 1:
-                wait_sec = 25 * (attempt + 1)
-                print(f"{wait_sec}초 대기 후 재시도...")
-                time.sleep(wait_sec)
-            else:
-                raise e
+                title = title_part.replace("TITLE:", "").strip().replace('"', '')
+                image_prompt = img_part.strip()
+                print(f"[{model_name}] 글 생성 성공!")
+                return title, image_prompt, content
+
+            except (ServerError, APIError) as e:
+                last_error = e
+                print(f"[{model_name}] 일시적 서버 오류/지연 (503/429 등): {e}")
+                if attempt < max_retries - 1:
+                    wait_sec = 15 * (attempt + 1)
+                    print(f"{wait_sec}초 대기 후 동일 모델 재시도...")
+                    time.sleep(wait_sec)
+                else:
+                    print(f"[{model_name}] 재시도 실패. 다음 대체 모델로 전환합니다.")
+            except Exception as e:
+                last_error = e
+                print(f"[{model_name}] 예외 발생: {e}")
+                break
+
+    raise last_error if last_error else RuntimeError("모든 제미나이 모델 생성 시도에 실패했습니다.")
 
 def download_image(image_prompt, file_base_name):
     """무료 Pollinations AI를 통해 이미지 생성 및 다운로드"""
